@@ -47,7 +47,6 @@ if __name__ == "__main__":
                 tf.ConnectivityException,
                 tf.ExtrapolationException,
             ):
-                print("Caught exception")
                 continue
 
             robot_angle = tf_conversions.transformations.quaternion_multiply(
@@ -56,12 +55,7 @@ if __name__ == "__main__":
                     ai=0, aj=0, ak=ROBOT_ANGLE_OFFSET
                 ),
             )
-            print(
-                "robot yaw:",
-                tf_conversions.transformations.euler_from_quaternion(robot_angle)[2]
-                / pi
-                * 180,
-            )
+
             poses = []
 
             # цикл по построенному пути
