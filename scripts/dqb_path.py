@@ -3,8 +3,11 @@
 import rospy
 import tf
 import tf_conversions
+import numpy as np
+import astar
+import typing
 from geometry_msgs.msg import Point, Pose, PoseStamped, Quaternion
-from nav_msgs.msg import Path, OccupancyGrid, MapMetaData
+from nav_msgs.msg import Path, OccupancyGrid
 from std_msgs.msg import Header
 from math import atan2, pi
 
@@ -24,6 +27,12 @@ from math import atan2, pi
 # - - - - w -> float
 
 
+NODE_NAME = "path"
+TOPIC_NAME = "dqb/path"
+QUEUE_SIZE = 10
+ROS_RATE_HZ = 1
+
+
 class NavigationPath(object):
     ROBOT_ANGLE_OFFSET = pi / 2
     MAP_TOPIC = "/map"
@@ -33,8 +42,12 @@ class NavigationPath(object):
     PATH_FRAME = "odom"
 
     def __init__(self) -> None:
-        self.map_subscriber = rospy.Subscriber(self.MAP_TOPIC, OccupancyGrid, self.map_callback)
-        self.goal_subscriber = rospy.Subscriber(self.GOAL_TOPIC, PoseStamped, self.goal_callback)
+        self.map_subscriber = rospy.Subscriber(
+            self.MAP_TOPIC, OccupancyGrid, self.map_callback
+        )
+        self.goal_subscriber = rospy.Subscriber(
+            self.GOAL_TOPIC, PoseStamped, self.goal_callback
+        )
         self.tf_listener = tf.TransformListener()
 
         self.step_count = 0
@@ -43,17 +56,27 @@ class NavigationPath(object):
         self.publisher = rospy.Publisher("dqb/path", Path, queue_size=10)
 
     def map_callback(self, occupancy_grid: OccupancyGrid) -> None:
-        print("LOG: map_callback")
         self.map = occupancy_grid
+        self.map.data = np.array(occupancy_grid.data).reshape(
+            (occupancy_grid.info.width, occupancy_grid.info.height)
+        )[::-1]
 
     def goal_callback(self, goal: PoseStamped) -> None:
-        print("LOG: goal_callback")
         self.goal = goal
         self.is_goal = True
 
+    def grid_to_global(x: int, y: int) -> typing.List[float]:
+        x = 0.0
+        y = 1.0
+        return [x, y]
+
+    def global_to_grid(x: float, y: float) -> typing.List[int]:
+        x = 0
+        y = 1
+        return [x, y]
+
     def step(self) -> None:
         self.step_count += 1
-        print("LOG: step", self.step_count)
 
         (trans, rot) = self.tf_listener.lookupTransform(
             source_frame=self.SOURCE_FRAME,
@@ -61,7 +84,7 @@ class NavigationPath(object):
             time=rospy.Time(0),
         )
 
-        robot_angle = tf_conversions.transformations.quaternion_multiply(
+        rot = tf_conversions.transformations.quaternion_multiply(
             rot,
             tf_conversions.transformations.quaternion_from_euler(
                 ai=0, aj=0, ak=self.ROBOT_ANGLE_OFFSET
@@ -70,10 +93,8 @@ class NavigationPath(object):
 
         self.robot = Pose(
             position=Point(x=trans[0], y=trans[1], z=trans[2]),
-            orientation=Quaternion(x=robot_angle[0], y=robot_angle[1], z=robot_angle[2], w=robot_angle[3])
+            orientation=Quaternion(x=rot[0], y=rot[1], z=rot[2], w=rot[3]),
         )
-
-        print(self.robot.position)
 
         poses = []
 
@@ -106,11 +127,6 @@ class NavigationPath(object):
         self.publisher.publish(self.path)
 
 
-NODE_NAME = "path"
-TOPIC_NAME = "dqb/path"
-QUEUE_SIZE = 10
-ROS_RATE_HZ = 0.2
-
 if __name__ == "__main__":
     try:
         rospy.init_node(NODE_NAME)
@@ -123,7 +139,6 @@ if __name__ == "__main__":
             try:
                 navigation_path.step()
             except:
-                print("Error at step", navigation_path.step_count)
                 continue
 
             update_rate.sleep()
