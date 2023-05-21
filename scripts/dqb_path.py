@@ -1,17 +1,17 @@
 #!/usr/bin/python3
 
+import tf_conversions
+import typing
+import numpy as np
 import rospy
 import tf
-import tf_conversions
-import numpy as np
-import typing
-from astar import astar
 from geometry_msgs.msg import Point, Pose, PoseStamped, Quaternion
 from nav_msgs.msg import Path, OccupancyGrid
 from std_msgs.msg import Header
-from math import atan2, pi
 from itertools import product
 from scipy import interpolate
+from astar import astar
+from math import atan2, pi
 
 
 NODE_NAME = "path"
