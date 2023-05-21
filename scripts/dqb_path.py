@@ -30,7 +30,7 @@ from math import atan2, pi
 NODE_NAME = "path"
 TOPIC_NAME = "dqb/path"
 QUEUE_SIZE = 10
-ROS_RATE_HZ = 1
+ROS_RATE_HZ = 0.5
 
 
 class NavigationPath(object):
@@ -59,10 +59,18 @@ class NavigationPath(object):
         self.map = occupancy_grid
         self.map.data = np.array(occupancy_grid.data).reshape(
             (occupancy_grid.info.width, occupancy_grid.info.height)
-        )[::-1]
+        )
+        # черная магия
+        self.map.data = np.flip(np.rot90(self.map.data), 0)
 
     def goal_callback(self, goal: PoseStamped) -> None:
         goal_grid = self.global_to_grid(goal.pose.position.x, goal.pose.position.y)
+        if self.map.data[goal_grid[0]][goal_grid[1]] == 100:
+            print("Goal is in obstacle")
+            self.is_goal = False
+            self.goal = None
+            return
+
         self.goal = goal
         self.goal.pose.position = Point(x=goal_grid[0], y=goal_grid[1], z=0)
         self.is_goal = True
@@ -101,49 +109,60 @@ class NavigationPath(object):
             orientation=Quaternion(x=rot[0], y=rot[1], z=rot[2], w=rot[3]),
         )
 
-        if self.is_goal:
-            path = astar(
-                self.map.data,
-                (self.robot.position.x, self.robot.position.y),
-                (self.goal.pose.position.x, self.goal.pose.position.y),
+        if not self.is_goal:
+            self.path = Path(
+                header=Header(stamp=rospy.Time.now(), frame_id=self.PATH_FRAME), poses=[]
             )
-            if not path:
-                rospy.logwarn("Warning: Path not found")
-                print(
-                    "Warning: Path between (%s; %s) and (%s; %s) not found",
-                    (
-                        self.robot.position.x,
-                        self.robot.position.y,
-                        self.goal.pose.position.x,
-                        self.goal.pose.position.y,
-                    ),
-                )
-                self.is_goal = False
+            self.publisher.publish(self.path)
+            return
+
+        astar_path = astar(
+            self.map.data,
+            (self.robot.position.x, self.robot.position.y),
+            (self.goal.pose.position.x, self.goal.pose.position.y),
+            allow_diagonal_movement=True,
+        )
+        if not astar_path:
+            print(
+                "Warning: Path between (%s; %s) and (%s; %s) not found"
+                % (
+                    self.robot.position.x,
+                    self.robot.position.y,
+                    self.goal.pose.position.x,
+                    self.goal.pose.position.y,
+                ),
+            )
+            self.is_goal = False
+            return
 
         poses = []
-
-        tick = 0
-        # цикл по построенному пути
-        for i in range(3):
-            point = Point(x=tick + i, y=tick + i, z=0)
-            angle_to_current = 0
-            if i != 0:
-                angle_to_current = atan2(
-                    point.y - poses[i - 1].pose.position.y,
-                    point.x - poses[i - 1].pose.position.x,
+        prev, curr, index = None, None, 0
+        for node in astar_path:
+            node_global = self.grid_to_global(node[0], node[1])
+            curr = Point(x=node_global[0], y=node_global[1], z=0)
+            angle_to_curr = 0
+            if prev:
+                angle_to_curr = atan2(
+                    curr.y - prev.y,
+                    curr.x - prev.x,
                 )
-
-            qt = tf_conversions.transformations.quaternion_from_euler(
-                ai=0, aj=0, ak=angle_to_current
+            quaternion = tf_conversions.transformations.quaternion_from_euler(
+                ai=0, aj=0, ak=angle_to_curr
             )
-            quaternion = Quaternion(x=qt[0], y=qt[1], z=qt[2], w=qt[3])
+            quaternion = Quaternion(
+                x=quaternion[0],
+                y=quaternion[1],
+                z=quaternion[2],
+                w=quaternion[3],
+            )
             pose = PoseStamped(
-                header=Header(seq=i),
-                pose=Pose(position=point, orientation=quaternion),
+                header=Header(seq=index),
+                pose=Pose(position=curr, orientation=quaternion),
             )
             poses.append(pose)
+            prev = curr
+            index += 1
 
-        tick += 1
         self.path = Path(
             header=Header(stamp=rospy.Time.now(), frame_id=self.PATH_FRAME), poses=poses
         )
