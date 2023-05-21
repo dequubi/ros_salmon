@@ -1,5 +1,7 @@
 # ros_salmon (SLNAM)
 
+![image](https://github.com/dequubi/ros_salmon/assets/47535336/67f801e0-56d4-424e-b9fa-0179a26850bb)
+
 Проект по реализации одновременной локализации, навигации и создания карты при помощи ROS.
 
 Демонстрация производится при помощи Gazebo и Turtlebot3.
