@@ -11,6 +11,8 @@ from nav_msgs.msg import Path, OccupancyGrid
 from std_msgs.msg import Header
 from math import atan2, pi
 from itertools import product
+from scipy import interpolate
+
 
 # Path:
 # - Header
@@ -31,7 +33,7 @@ from itertools import product
 NODE_NAME = "path"
 TOPIC_NAME = "dqb/path"
 QUEUE_SIZE = 10
-ROS_RATE_HZ = 0.5
+ROS_RATE_HZ = 0.25
 
 
 class NavigationPath(object):
@@ -81,10 +83,9 @@ class NavigationPath(object):
                     if self.map.data[point[0]][point[1]] < self.MAP_PADDING:
                         self.map.data[point[0]][point[1]] = self.MAP_PADDING
 
-
     def goal_callback(self, goal: PoseStamped) -> None:
         goal_grid = self.global_to_grid(goal.pose.position.x, goal.pose.position.y)
-        if self.map.data[goal_grid[0]][goal_grid[1]] == self.MAP_OBSTACLE:
+        if self.map.data[goal_grid[0]][goal_grid[1]] >= self.MAP_PADDING:
             print("Goal is in obstacle")
             self.is_goal = False
             self.goal = None
@@ -104,7 +105,14 @@ class NavigationPath(object):
     def points_in_circle(self, center_x, center_y, radius):
         for x, y in product(range(int(radius) + 1), repeat=2):
             if x**2 + y**2 <= radius**2:
-                yield from set(((center_x + x, center_y + y), (center_x + x, center_y - y), (center_x - x, center_y + y), (center_x - x, center_y - y),))
+                yield from set(
+                    (
+                        (center_x + x, center_y + y),
+                        (center_x + x, center_y - y),
+                        (center_x - x, center_y + y),
+                        (center_x - x, center_y - y),
+                    )
+                )
 
     def grid_to_global(self, x: int, y: int) -> typing.List[float]:
         x_global = x * self.map.info.resolution + self.map.info.origin.position.x
@@ -115,6 +123,17 @@ class NavigationPath(object):
         x_grid = int((x - self.map.info.origin.position.x) / self.map.info.resolution)
         y_grid = int((y - self.map.info.origin.position.y) / self.map.info.resolution)
         return [x_grid, y_grid]
+
+    def path_smoothing(self, path):
+        path = path[::4]
+        x, y = zip(*path)
+        f, u = interpolate.splprep([x, y], s=0)
+        x_arr, y_arr = interpolate.splev(np.linspace(0, 1, 100), f)
+        smooth = []
+        for i, item in enumerate(x_arr):
+            smooth.append((item, y_arr[i]))
+
+        return smooth
 
     def step(self) -> None:
         self.step_count += 1
@@ -153,6 +172,7 @@ class NavigationPath(object):
             (self.goal.pose.position.x, self.goal.pose.position.y),
             allow_diagonal_movement=True,
         )
+
         if not astar_path:
             print(
                 "Warning: Path between (%s; %s) and (%s; %s) not found"
@@ -165,6 +185,8 @@ class NavigationPath(object):
             )
             self.is_goal = False
             return
+
+        astar_path = self.path_smoothing(astar_path)
 
         poses = []
         prev, curr, index = None, None, 0
