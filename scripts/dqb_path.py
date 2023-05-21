@@ -14,22 +14,6 @@ from itertools import product
 from scipy import interpolate
 
 
-# Path:
-# - Header
-# - PoseStamped[]
-# - - Header
-# - - Pose
-# - - - Point
-# - - - - x -> float
-# - - - - y -> float
-# - - - - z -> float
-# - - - Quaternion
-# - - - - x -> float
-# - - - - y -> float
-# - - - - z -> float
-# - - - - w -> float
-
-
 NODE_NAME = "path"
 TOPIC_NAME = "dqb/path"
 QUEUE_SIZE = 10
@@ -227,7 +211,7 @@ if __name__ == "__main__":
     try:
         rospy.init_node(NODE_NAME)
         publisher = rospy.Publisher(TOPIC_NAME, Path, queue_size=QUEUE_SIZE)
-        update_rate = rospy.Rate(ROS_RATE_HZ)  # hz
+        update_rate = rospy.Rate(ROS_RATE_HZ)
 
         navigation_path = NavigationPath()
 
