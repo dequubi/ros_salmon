@@ -1,6 +1,11 @@
 from warnings import warn
 import heapq
 
+MAP_OBSTACLE = 100
+MAP_PADDING = 90
+MAP_FREE = 0
+MAP_UNKNOWN = -1
+
 
 class Node:
     """
@@ -123,7 +128,7 @@ def astar(maze, start, end, allow_diagonal_movement=False):
                 continue
 
             # Make sure walkable terrain
-            if maze[node_position[0]][node_position[1]] == 100:
+            if maze[node_position[0]][node_position[1]] >= MAP_PADDING:
                 continue
 
             # Create new node

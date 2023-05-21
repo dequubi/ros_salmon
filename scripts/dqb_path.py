@@ -10,6 +10,7 @@ from geometry_msgs.msg import Point, Pose, PoseStamped, Quaternion
 from nav_msgs.msg import Path, OccupancyGrid
 from std_msgs.msg import Header
 from math import atan2, pi
+from itertools import product
 
 # Path:
 # - Header
@@ -35,11 +36,17 @@ ROS_RATE_HZ = 0.5
 
 class NavigationPath(object):
     ROBOT_ANGLE_OFFSET = pi / 2
+    ROBOT_RADIUS = 5
     MAP_TOPIC = "/map"
     GOAL_TOPIC = "/move_base_simple/goal"
     SOURCE_FRAME = "base_footprint"
     TARGET_FRAME = "map"
     PATH_FRAME = "odom"
+
+    MAP_OBSTACLE = 100
+    MAP_PADDING = 90
+    MAP_FREE = 0
+    MAP_UNKNOWN = -1
 
     def __init__(self) -> None:
         self.map_subscriber = rospy.Subscriber(
@@ -60,12 +67,24 @@ class NavigationPath(object):
         self.map.data = np.array(occupancy_grid.data).reshape(
             (occupancy_grid.info.width, occupancy_grid.info.height)
         )
+
         # черная магия
         self.map.data = np.flip(np.rot90(self.map.data), 0)
 
+        # добавление паддинга препятствиям
+        corners = self.find_bounding_box(self.map.data)
+        for i in range(corners[0][0], corners[1][0]):
+            for j in range(corners[0][1], corners[1][1]):
+                if self.map.data[i][j] <= self.MAP_PADDING:
+                    continue
+                for point in self.points_in_circle(i, j, self.ROBOT_RADIUS):
+                    if self.map.data[point[0]][point[1]] < self.MAP_PADDING:
+                        self.map.data[point[0]][point[1]] = self.MAP_PADDING
+
+
     def goal_callback(self, goal: PoseStamped) -> None:
         goal_grid = self.global_to_grid(goal.pose.position.x, goal.pose.position.y)
-        if self.map.data[goal_grid[0]][goal_grid[1]] == 100:
+        if self.map.data[goal_grid[0]][goal_grid[1]] == self.MAP_OBSTACLE:
             print("Goal is in obstacle")
             self.is_goal = False
             self.goal = None
@@ -75,6 +94,17 @@ class NavigationPath(object):
         self.goal.pose.position = Point(x=goal_grid[0], y=goal_grid[1], z=0)
         self.is_goal = True
         self.step()
+
+    def find_bounding_box(self, np_array):
+        x, y = np.where(np_array != self.MAP_UNKNOWN)
+        top_left = x.min(), y.min()
+        bottom_right = x.max(), y.max()
+        return [top_left, bottom_right]
+
+    def points_in_circle(self, center_x, center_y, radius):
+        for x, y in product(range(int(radius) + 1), repeat=2):
+            if x**2 + y**2 <= radius**2:
+                yield from set(((center_x + x, center_y + y), (center_x + x, center_y - y), (center_x - x, center_y + y), (center_x - x, center_y - y),))
 
     def grid_to_global(self, x: int, y: int) -> typing.List[float]:
         x_global = x * self.map.info.resolution + self.map.info.origin.position.x
@@ -111,7 +141,8 @@ class NavigationPath(object):
 
         if not self.is_goal:
             self.path = Path(
-                header=Header(stamp=rospy.Time.now(), frame_id=self.PATH_FRAME), poses=[]
+                header=Header(stamp=rospy.Time.now(), frame_id=self.PATH_FRAME),
+                poses=[],
             )
             self.publisher.publish(self.path)
             return
