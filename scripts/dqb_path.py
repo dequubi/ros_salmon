@@ -4,8 +4,8 @@ import rospy
 import tf
 import tf_conversions
 import numpy as np
-import astar
 import typing
+from astar import astar
 from geometry_msgs.msg import Point, Pose, PoseStamped, Quaternion
 from nav_msgs.msg import Path, OccupancyGrid
 from std_msgs.msg import Header
@@ -62,18 +62,21 @@ class NavigationPath(object):
         )[::-1]
 
     def goal_callback(self, goal: PoseStamped) -> None:
+        goal_grid = self.global_to_grid(goal.pose.position.x, goal.pose.position.y)
         self.goal = goal
+        self.goal.pose.position = Point(x=goal_grid[0], y=goal_grid[1], z=0)
         self.is_goal = True
+        self.step()
 
-    def grid_to_global(x: int, y: int) -> typing.List[float]:
-        x = 0.0
-        y = 1.0
-        return [x, y]
+    def grid_to_global(self, x: int, y: int) -> typing.List[float]:
+        x_global = x * self.map.info.resolution + self.map.info.origin.position.x
+        y_global = y * self.map.info.resolution + self.map.info.origin.position.y
+        return [x_global, y_global]
 
-    def global_to_grid(x: float, y: float) -> typing.List[int]:
-        x = 0
-        y = 1
-        return [x, y]
+    def global_to_grid(self, x: float, y: float) -> typing.List[int]:
+        x_grid = int((x - self.map.info.origin.position.x) / self.map.info.resolution)
+        y_grid = int((y - self.map.info.origin.position.y) / self.map.info.resolution)
+        return [x_grid, y_grid]
 
     def step(self) -> None:
         self.step_count += 1
@@ -91,10 +94,31 @@ class NavigationPath(object):
             ),
         )
 
+        robot_grid = self.global_to_grid(trans[0], trans[1])
+
         self.robot = Pose(
-            position=Point(x=trans[0], y=trans[1], z=trans[2]),
+            position=Point(x=robot_grid[0], y=robot_grid[1], z=0),
             orientation=Quaternion(x=rot[0], y=rot[1], z=rot[2], w=rot[3]),
         )
+
+        if self.is_goal:
+            path = astar(
+                self.map.data,
+                (self.robot.position.x, self.robot.position.y),
+                (self.goal.pose.position.x, self.goal.pose.position.y),
+            )
+            if not path:
+                rospy.logwarn("Warning: Path not found")
+                print(
+                    "Warning: Path between (%s; %s) and (%s; %s) not found",
+                    (
+                        self.robot.position.x,
+                        self.robot.position.y,
+                        self.goal.pose.position.x,
+                        self.goal.pose.position.y,
+                    ),
+                )
+                self.is_goal = False
 
         poses = []
 
